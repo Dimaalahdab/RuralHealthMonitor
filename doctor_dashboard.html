@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rural Health Monitor — Doctor Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f8f9fa; color: #212529; }
+
+  /* ── Upload screen ── */
+  #upload-screen {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .upload-card {
+    background: white;
+    border-radius: 20px;
+    padding: 48px 40px;
+    max-width: 440px;
+    width: 100%;
+    text-align: center;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+    border: 1px solid #e9ecef;
+  }
+  .upload-icon {
+    width: 72px; height: 72px;
+    background: #e7f3ff;
+    border-radius: 18px;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 20px;
+    font-size: 32px;
+  }
+  .upload-card h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+  .upload-card p { font-size: 14px; color: #6c757d; margin-bottom: 28px; }
+  .upload-btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: #0d6efd; color: white;
+    padding: 14px 28px; border-radius: 10px;
+    font-size: 15px; font-weight: 600; cursor: pointer;
+    border: none; width: 100%; justify-content: center;
+    transition: background .2s;
+  }
+  .upload-btn:hover { background: #0a58ca; }
+  #file-input { display: none; }
+  .security-note {
+    margin-top: 20px; padding: 12px;
+    background: #fffbeb; border-radius: 8px;
+    font-size: 12px; color: #92400e;
+    border: 1px solid #fcd34d;
+    display: flex; align-items: flex-start; gap: 8px; text-align: left;
+  }
+
+  /* ── Dashboard screen ── */
+  #dashboard-screen { display: none; }
+  .top-bar {
+    background: white; border-bottom: 1px solid #e9ecef;
+    padding: 16px 24px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .top-bar-left { display: flex; align-items: center; gap: 12px; }
+  .logo { font-size: 18px; font-weight: 700; color: #212529; }
+  .logo span { color: #0d6efd; }
+  .patient-badge {
+    background: #e7f3ff; color: #0d6efd;
+    padding: 6px 14px; border-radius: 20px;
+    font-size: 13px; font-weight: 600;
+  }
+  .reset-btn {
+    background: none; border: 1px solid #dee2e6; color: #6c757d;
+    padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px;
+    transition: all .2s;
+  }
+  .reset-btn:hover { border-color: #dc3545; color: #dc3545; }
+
+  .content { max-width: 1100px; margin: 0 auto; padding: 24px; }
+
+  /* Patient header */
+  .patient-header {
+    background: white; border-radius: 14px; padding: 20px 24px;
+    border: 1px solid #e9ecef;
+    display: flex; align-items: center; gap: 16px;
+    margin-bottom: 20px;
+  }
+  .avatar {
+    width: 56px; height: 56px; border-radius: 50%;
+    background: #e7f3ff; display: flex; align-items: center;
+    justify-content: center; font-size: 22px; font-weight: 700;
+    color: #0d6efd; flex-shrink: 0;
+  }
+  .patient-info h2 { font-size: 20px; font-weight: 700; }
+  .patient-info p { font-size: 13px; color: #6c757d; margin-top: 2px; }
+
+  /* Summary cards */
+  .summary-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px; margin-bottom: 20px;
+  }
+  .summary-card {
+    background: white; border-radius: 12px; padding: 16px;
+    border: 1px solid #e9ecef; text-align: center;
+  }
+  .summary-card .val { font-size: 28px; font-weight: 700; }
+  .summary-card .lbl { font-size: 12px; color: #6c757d; margin-top: 2px; }
+  .text-blue { color: #0d6efd; }
+  .text-green { color: #198754; }
+  .text-red { color: #dc3545; }
+  .text-orange { color: #fd7e14; }
+
+  /* Charts */
+  .charts-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 16px; margin-bottom: 20px;
+  }
+  .chart-card {
+    background: white; border-radius: 12px; padding: 20px;
+    border: 1px solid #e9ecef;
+  }
+  .chart-card h3 { font-size: 13px; font-weight: 600; color: #6c757d; margin-bottom: 14px; }
+  .chart-card canvas { max-height: 180px; }
+
+  /* Table */
+  .table-card {
+    background: white; border-radius: 14px; padding: 20px;
+    border: 1px solid #e9ecef; overflow: hidden;
+  }
+  .table-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .table-header h3 { font-size: 15px; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    padding: 10px 12px; text-align: left;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+    color: #6c757d; background: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+  }
+  td { padding: 10px 12px; border-bottom: 1px solid #f1f3f5; }
+  tr.risk { background: #fff5f5; }
+  tr.risk td { color: #dc3545; }
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 700;
+  }
+  .badge-ok { background: #d1fae5; color: #065f46; }
+  .badge-risk { background: #fee2e2; color: #991b1b; }
+
+  /* Trend note */
+  .trend-note {
+    background: #f0f9ff; border-radius: 10px; padding: 14px 16px;
+    margin-bottom: 20px; font-size: 13px; color: #0369a1;
+    border: 1px solid #bae6fd;
+    display: flex; gap: 8px; align-items: flex-start;
+  }
+
+  #error-msg {
+    display: none; margin-top: 12px;
+    background: #fee2e2; color: #991b1b; padding: 12px 16px;
+    border-radius: 8px; font-size: 13px;
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Upload Screen ─────────────────────────────── -->
+<div id="upload-screen">
+  <div class="upload-card">
+    <div class="upload-icon">🏥</div>
+    <h1>Doctor Dashboard</h1>
+    <p>Upload the patient's encrypted health data file to view their readings, trends, and risk analysis.</p>
+    <label class="upload-btn" for="file-input">
+      📂 Upload patient_data.json
+    </label>
+    <input type="file" id="file-input" accept=".json">
+    <div class="security-note">
+      🔒 <span>Data is decrypted locally in your browser. Nothing is uploaded to any server. Works completely offline.</span>
+    </div>
+    <div id="error-msg"></div>
+  </div>
+</div>
+
+<!-- ── Dashboard Screen ──────────────────────────── -->
+<div id="dashboard-screen">
+  <div class="top-bar">
+    <div class="top-bar-left">
+      <span class="logo">Rural <span>Health</span> Monitor</span>
+      <span class="patient-badge" id="top-patient-name">Patient</span>
+    </div>
+    <button class="reset-btn" onclick="resetDashboard()">← Upload Another File</button>
+  </div>
+
+  <div class="content">
+    <!-- Patient info -->
+    <div class="patient-header">
+      <div class="avatar" id="patient-avatar">?</div>
+      <div class="patient-info">
+        <h2 id="patient-name-big">Patient Name</h2>
+        <p id="patient-meta">Age — · Data exported —</p>
+      </div>
+    </div>
+
+    <!-- Trend note -->
+    <div class="trend-note" id="trend-note">
+      📊 Loading trend analysis...
+    </div>
+
+    <!-- Summary cards -->
+    <div class="summary-grid">
+      <div class="summary-card">
+        <div class="val text-blue" id="total-readings">0</div>
+        <div class="lbl">Total Readings</div>
+      </div>
+      <div class="summary-card">
+        <div class="val text-red" id="risk-pct">0%</div>
+        <div class="lbl">Risk Rate</div>
+      </div>
+      <div class="summary-card">
+        <div class="val text-orange" id="avg-hr">—</div>
+        <div class="lbl">Avg Heart Rate (BPM)</div>
+      </div>
+      <div class="summary-card">
+        <div class="val text-orange" id="avg-temp">—</div>
+        <div class="lbl">Avg Temperature (°C)</div>
+      </div>
+      <div class="summary-card">
+        <div class="val text-green" id="avg-spo2">—</div>
+        <div class="lbl">Avg SpO₂ (%)</div>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="charts-grid">
+      <div class="chart-card">
+        <h3>❤ HEART RATE (BPM)</h3>
+        <canvas id="hrChart"></canvas>
+      </div>
+      <div class="chart-card">
+        <h3>🌡 TEMPERATURE (°C)</h3>
+        <canvas id="tempChart"></canvas>
+      </div>
+      <div class="chart-card">
+        <h3>💨 BLOOD OXYGEN SpO₂ (%)</h3>
+        <canvas id="spo2Chart"></canvas>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="table-card">
+      <div class="table-header">
+        <h3>All Readings</h3>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>TIME</th>
+              <th>HEART RATE</th>
+              <th>TEMPERATURE</th>
+              <th>SpO₂</th>
+              <th>STATUS</th>
+            </tr>
+          </thead>
+          <tbody id="readings-table"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const ENC_KEY_RAW = 'RuralHealthKey2024';
+const ENC_KEY = ENC_KEY_RAW.padEnd(32, '0').substring(0, 32);
+
+// ── File upload handler ──────────────────────────────────────────────────────
+document.getElementById('file-input').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(evt) {
+    try {
+      const content = evt.target.result;
+      const decrypted = decryptData(content.trim());
+      const data = JSON.parse(decrypted);
+      renderDashboard(data);
+    } catch(err) {
+      showError('Could not read the file. Make sure it is a valid patient_data.json export. Error: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+});
+
+function decryptData(ciphertext) {
+  // Format written by Flutter: base64(iv):base64(encrypted)
+  const parts = ciphertext.split(':');
+  if (parts.length < 2) throw new Error('Invalid file format');
+  const ivBase64 = parts[0];
+  const encBase64 = parts.slice(1).join(':'); // rejoin in case of colons in data
+  const iv = CryptoJS.enc.Base64.parse(ivBase64);
+  const key = CryptoJS.enc.Utf8.parse(ENC_KEY);
+  const decrypted = CryptoJS.AES.decrypt(encBase64, key, {
+    iv: iv,
+    mode: CryptoJS.mode.CBC,
+    padding: CryptoJS.pad.Pkcs7
+  });
+  return decrypted.toString(CryptoJS.enc.Utf8);
+}
+
+function renderDashboard(data) {
+  // Patient info
+  const patient = data.patient || {};
+  const name = patient.name || 'Unknown Patient';
+  const age = patient.age || '?';
+  const exportedAt = data.exported_at ? new Date(data.exported_at).toLocaleString() : 'Unknown';
+  const readings = data.readings || [];
+
+  document.getElementById('patient-avatar').textContent = name.charAt(0).toUpperCase();
+  document.getElementById('patient-name-big').textContent = name;
+  document.getElementById('patient-meta').textContent = `Age ${age} · Exported ${exportedAt}`;
+  document.getElementById('top-patient-name').textContent = name;
+
+  if (!readings.length) { showError('No readings found in this file.'); return; }
+
+  // Summary stats
+  const total = readings.length;
+  const riskCount = readings.filter(r => r.status === 'RISK').length;
+  const avgHr = (readings.reduce((s,r) => s + r.HR, 0) / total).toFixed(0);
+  const avgTemp = (readings.reduce((s,r) => s + r.TEMP, 0) / total).toFixed(1);
+  const avgSpo2 = (readings.reduce((s,r) => s + r.SPO2, 0) / total).toFixed(0);
+  const riskPct = ((riskCount / total) * 100).toFixed(0);
+
+  document.getElementById('total-readings').textContent = total;
+  document.getElementById('risk-pct').textContent = riskPct + '%';
+  document.getElementById('avg-hr').textContent = avgHr;
+  document.getElementById('avg-temp').textContent = avgTemp;
+  document.getElementById('avg-spo2').textContent = avgSpo2;
+
+  // Trend note
+  const last5 = readings.slice(0, 5);
+  const spo2Trend = last5[0].SPO2 - last5[last5.length - 1].SPO2;
+  const hrTrend = last5[0].HR - last5[last5.length - 1].HR;
+  let trendText = '📊 ';
+  if (spo2Trend < -2) trendText += `SpO₂ is dropping in recent readings (${last5[last5.length-1].SPO2}% → ${last5[0].SPO2}%). `;
+  else if (avgSpo2 < 94) trendText += 'SpO₂ average is below safe threshold (94%). ';
+  else trendText += 'SpO₂ levels appear stable. ';
+  if (hrTrend > 10) trendText += `Heart rate is rising in recent readings. `;
+  else if (avgHr > 100) trendText += 'Average heart rate is elevated. ';
+  if (riskPct > 20) trendText += `${riskPct}% of readings were marked RISK — consider follow-up.`;
+  else trendText += 'Risk rate is within acceptable range.';
+  document.getElementById('trend-note').textContent = trendText;
+
+  // Charts (reversed so oldest is left)
+  const rev = [...readings].reverse();
+  const labels = rev.map((r, i) => {
+    try { return new Date(r.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
+    catch { return `#${i+1}`; }
+  });
+
+  function makeChart(id, label, data, color, min, max) {
+    new Chart(document.getElementById(id), {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label,
+          data,
+          borderColor: color,
+          backgroundColor: color + '18',
+          fill: true,
+          tension: 0.3,
+          pointRadius: data.length > 40 ? 0 : 3,
+          borderWidth: 2,
+        }]
+      },
+      options: {
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { min, max, grid: { color: '#f1f3f5' } },
+          x: { ticks: { maxTicksLimit: 6, font: { size: 10 } } }
+        },
+        responsive: true,
+        maintainAspectRatio: true,
+      }
+    });
+  }
+
+  makeChart('hrChart',   'HR (BPM)', rev.map(r => r.HR),   '#dc3545', 30, null);
+  makeChart('tempChart', 'Temp °C',  rev.map(r => r.TEMP),  '#fd7e14', 34, null);
+  makeChart('spo2Chart', 'SpO₂ %',  rev.map(r => r.SPO2),  '#0d6efd', 80, 100);
+
+  // Table
+  const tbody = document.getElementById('readings-table');
+  tbody.innerHTML = readings.map((r, i) => {
+    const isRisk = r.status === 'RISK';
+    let time = r.time;
+    try { time = new Date(r.time).toLocaleString(); } catch {}
+    return `<tr class="${isRisk ? 'risk' : ''}">
+      <td>${i + 1}</td>
+      <td>${time}</td>
+      <td>${r.HR} bpm</td>
+      <td>${r.TEMP}°C</td>
+      <td>${r.SPO2}%</td>
+      <td><span class="badge ${isRisk ? 'badge-risk' : 'badge-ok'}">${r.status}</span></td>
+    </tr>`;
+  }).join('');
+
+  // Show dashboard
+  document.getElementById('upload-screen').style.display = 'none';
+  document.getElementById('dashboard-screen').style.display = 'block';
+}
+
+function showError(msg) {
+  const el = document.getElementById('error-msg');
+  el.style.display = 'block';
+  el.textContent = '⚠ ' + msg;
+}
+
+function resetDashboard() {
+  document.getElementById('upload-screen').style.display = 'flex';
+  document.getElementById('dashboard-screen').style.display = 'none';
+  document.getElementById('file-input').value = '';
+  document.getElementById('error-msg').style.display = 'none';
+}
+</script>
+</body>
+</html>
