@@ -1,6 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
-import '../../../models/vital_reading.dart';
+import '../models/vital_reading.dart';
 
 class DatabaseService {
   static Database? _db;
@@ -37,10 +37,7 @@ class DatabaseService {
 
   Future<List<VitalReading>> getAllReadings() async {
     final database = await db;
-    final maps = await database.query(
-      'readings',
-      orderBy: 'id DESC',
-    );
+    final maps = await database.query('readings', orderBy: 'id DESC');
     return maps.map(VitalReading.fromMap).toList();
   }
 

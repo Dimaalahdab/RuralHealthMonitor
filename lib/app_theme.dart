@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 class AppTheme {
   // Brand colors
+  static const Color purple = Color(0xFF6750A4);
+  static const Color purpleLight = Color(0xFFEADDFF);
   static const Color primary = Color(0xFF0D6EFD);
   static const Color primaryDark = Color(0xFF0A58CA);
   static const Color success = Color(0xFF198754);
@@ -16,7 +18,7 @@ class AppTheme {
   static ThemeData get theme => ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: primary,
+          seedColor: purple,
           brightness: Brightness.light,
         ),
         scaffoldBackgroundColor: background,
@@ -42,7 +44,7 @@ class AppTheme {
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
-            backgroundColor: primary,
+            backgroundColor: purple,
             foregroundColor: Colors.white,
             elevation: 0,
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),

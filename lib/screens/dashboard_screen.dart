@@ -1,305 +1,264 @@
-import 'dart:async';
+// lib/screens/dashboard_screen.dart
+// UPDATED: Bluetooth wired into LiveDashboard.
+// Only LiveDashboard changed — everything else (tabs, nav, history, export) is identical.
+
 import 'package:flutter/material.dart';
-import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import '../app_theme.dart';
 import '../models/patient_profile.dart';
 import '../models/vital_reading.dart';
 import '../services/database_service.dart';
+import '../services/bluetooth_service.dart';
 import 'history_screen.dart';
 import 'export_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final PatientProfile profile;
-  const DashboardScreen({super.key, required this.profile});
+  final int initialTab;
+  const DashboardScreen({super.key, required this.profile, this.initialTab = 0});
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  final _dbService = DatabaseService();
-  BluetoothConnection? _connection;
+  late int _currentTab;
+
+  @override
+  void initState() { super.initState(); _currentTab = widget.initialTab; }
+
+  void _goTab(int i) => setState(() => _currentTab = i);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      body: Stack(children: [
+        _tab(0, LiveDashboard(profile: widget.profile)),
+        _tab(1, HistoryBody(profile: widget.profile)),
+        _tab(2, ExportBody(profile: widget.profile)),
+      ]),
+      bottomNavigationBar: _AppBottomNav(currentIndex: _currentTab, onTap: _goTab),
+    );
+  }
+
+  Widget _tab(int i, Widget child) => Offstage(offstage: _currentTab != i, child: child);
+}
+
+// ── Bottom nav — unchanged ─────────────────────────────────────────────────────
+class _AppBottomNav extends StatelessWidget {
+  final int currentIndex;
+  final ValueChanged<int> onTap;
+  const _AppBottomNav({required this.currentIndex, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: Color(0xFFE9ECEF))),
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 64,
+          child: Row(children: [
+            _NavItem(icon: Icons.grid_view_rounded,      label: 'Dashboard', selected: currentIndex == 0, onTap: () => onTap(0)),
+            _NavItem(icon: Icons.calendar_month_rounded, label: 'History',   selected: currentIndex == 1, onTap: () => onTap(1)),
+            _NavItem(icon: Icons.upload_rounded,         label: 'Export',    selected: currentIndex == 2, onTap: () => onTap(2)),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+class _NavItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _NavItem({required this.icon, required this.label, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected ? AppTheme.purple : AppTheme.textSecondary;
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(icon, color: color, size: 22),
+          const SizedBox(height: 4),
+          Text(label, style: TextStyle(fontSize: 11, fontWeight: selected ? FontWeight.w600 : FontWeight.w400, color: color)),
+        ]),
+      ),
+    );
+  }
+}
+
+// ── Live Dashboard — UPDATED with real Bluetooth ──────────────────────────────
+class LiveDashboard extends StatefulWidget {
+  final PatientProfile profile;
+  const LiveDashboard({super.key, required this.profile});
+
+  @override
+  State<LiveDashboard> createState() => _LiveDashboardState();
+}
+
+class _LiveDashboardState extends State<LiveDashboard> {
+  final _bt = BluetoothService();
+  final List<double> _history = [];
   bool _connecting = false;
-  bool _connected = false;
-  String _statusMsg = 'Tap Connect to start monitoring';
-  VitalReading? _latest;
-  final List<double> _hrHistory = [];
-  String _buffer = '';
-  int _currentIndex = 0;
+  String? _btError;
+
+  @override
+  void initState() {
+    super.initState();
+    _bt.addListener(_onBtUpdate);
+  }
 
   @override
   void dispose() {
-    _connection?.dispose();
+    _bt.removeListener(_onBtUpdate);
     super.dispose();
   }
 
-  Future<void> _connectBluetooth() async {
-    setState(() {
-      _connecting = true;
-      _statusMsg = 'Scanning for RuralHealthMonitor...';
-    });
-
-    try {
-      final devices = await FlutterBluetoothSerial.instance.getBondedDevices();
-      BluetoothDevice? target;
-      for (final d in devices) {
-        if (d.name == 'RuralHealthMonitor') {
-          target = d;
-          break;
-        }
-      }
-
-      if (target == null) {
-        setState(() {
-          _connecting = false;
-          _statusMsg = 'Device not found. Pair it in Bluetooth settings first.';
-        });
-        return;
-      }
-
-      final conn = await BluetoothConnection.toAddress(target.address);
-      setState(() {
-        _connection = conn;
-        _connected = true;
-        _connecting = false;
-        _statusMsg = 'Connected — place finger on sensor';
-      });
-
-      conn.input!.listen(
-        (data) {
-          _buffer += String.fromCharCodes(data);
-          while (_buffer.contains('\n')) {
-            final idx = _buffer.indexOf('\n');
-            final line = _buffer.substring(0, idx).trim();
-            _buffer = _buffer.substring(idx + 1);
-            if (line.contains('HR:')) _processLine(line);
-          }
-        },
-        onDone: () {
-          setState(() {
-            _connected = false;
-            _statusMsg = 'Connection lost. Tap Connect to retry.';
-          });
-        },
-      );
-    } catch (e) {
-      setState(() {
-        _connecting = false;
-        _statusMsg = 'Connection failed: $e';
-      });
+  void _onBtUpdate() {
+    if (!mounted) return;
+    final latest = _bt.latest;
+    if (latest != null && latest.hr > 0) {
+      _history.add(latest.hr);
+      if (_history.length > 8) _history.removeAt(0);
     }
+    setState(() {});
   }
 
-  Future<void> _processLine(String line) async {
-    final reading = VitalReading.fromBluetoothString(line);
-    await _dbService.insertReading(reading);
-    setState(() {
-      _latest = reading;
-      _hrHistory.add(reading.hr);
-      if (_hrHistory.length > 20) _hrHistory.removeAt(0);
-    });
-  }
-
-  void _disconnect() {
-    _connection?.dispose();
-    setState(() {
-      _connection = null;
-      _connected = false;
-      _statusMsg = 'Disconnected. Tap Connect to start monitoring.';
-    });
+  Future<void> _scan() async {
+    setState(() { _connecting = true; _btError = null; });
+    final error = await _bt.connect();
+    if (!mounted) return;
+    setState(() { _connecting = false; _btError = error; });
   }
 
   @override
   Widget build(BuildContext context) {
-    final isRisk = _latest?.isRisk ?? false;
+    final connected = _bt.isConnected;
+    final latest    = _bt.latest;
+    final isRisk    = latest?.isRisk ?? false;
+
+    final initials = widget.profile.name.trim().split(' ')
+        .where((w) => w.isNotEmpty).map((w) => w[0]).take(2).join().toUpperCase();
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: Row(
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: AppTheme.primary.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(Icons.favorite_rounded,
-                  color: AppTheme.primary, size: 16),
-            ),
-            const SizedBox(width: 10),
-            Text(widget.profile.name),
-          ],
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.history_rounded),
-            tooltip: 'History',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => HistoryScreen(profile: widget.profile),
-              ),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.upload_file_rounded),
-            tooltip: 'Export',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ExportScreen(profile: widget.profile),
-              ),
-            ),
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Status bar
-            _StatusBanner(
-              isRisk: isRisk,
-              message: _statusMsg,
-              connected: _connected,
-            ),
-            const SizedBox(height: 16),
-            // Vital cards
-            Row(
-              children: [
-                Expanded(
-                  child: _VitalCard(
-                    icon: Icons.favorite_rounded,
-                    label: 'Heart Rate',
-                    value: _latest != null ? '${_latest!.hr.toInt()}' : '--',
-                    unit: 'BPM',
-                    isRisk: _latest != null && (_latest!.hr > 110 || _latest!.hr < 50),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _VitalCard(
-                    icon: Icons.thermostat_rounded,
-                    label: 'Temperature',
-                    value: _latest != null ? _latest!.temp.toStringAsFixed(1) : '--',
-                    unit: '°C',
-                    isRisk: _latest != null && _latest!.temp > 38.0,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            _VitalCard(
-              icon: Icons.air_rounded,
-              label: 'Blood Oxygen (SpO₂)',
-              value: _latest != null ? '${_latest!.spo2.toInt()}' : '--',
-              unit: '%',
-              isRisk: _latest != null && _latest!.spo2 < 94,
-              wide: true,
-            ),
-            const SizedBox(height: 20),
-            // Mini chart
-            if (_hrHistory.length > 1)
-              _MiniChart(values: _hrHistory, label: 'Heart Rate Trend'),
-            const SizedBox(height: 24),
-            // Connect / disconnect button
-            SizedBox(
-              width: double.infinity,
-              child: _connected
-                  ? OutlinedButton.icon(
-                      onPressed: _disconnect,
-                      icon: const Icon(Icons.bluetooth_disabled),
-                      label: const Text('Disconnect'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppTheme.danger,
-                        side: const BorderSide(color: AppTheme.danger),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                    )
-                  : ElevatedButton.icon(
-                      onPressed: _connecting ? null : _connectBluetooth,
-                      icon: _connecting
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Colors.white))
-                          : const Icon(Icons.bluetooth_rounded),
-                      label:
-                          Text(_connecting ? 'Connecting...' : 'Connect to Device'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                    ),
-            ),
-            const SizedBox(height: 32),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ── Sub-widgets ──────────────────────────────────────────────────────────────
-
-class _StatusBanner extends StatelessWidget {
-  final bool isRisk;
-  final bool connected;
-  final String message;
-
-  const _StatusBanner(
-      {required this.isRisk,
-      required this.connected,
-      required this.message});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = isRisk ? AppTheme.danger : AppTheme.success;
-    final bgColor = isRisk
-        ? AppTheme.danger.withOpacity(0.08)
-        : connected
-            ? AppTheme.success.withOpacity(0.08)
-            : AppTheme.cardBorder.withOpacity(0.3);
-    final icon = isRisk
-        ? Icons.warning_rounded
-        : connected
-            ? Icons.check_circle_rounded
-            : Icons.bluetooth_rounded;
-    final textColor =
-        isRisk ? AppTheme.danger : connected ? AppTheme.success : AppTheme.textSecondary;
-    final label = isRisk
-        ? '⚠ RISK DETECTED — Please seek medical attention'
-        : connected
-            ? '✓ NORMAL — All readings within safe range'
-            : message;
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: textColor.withOpacity(0.3)),
-      ),
-      child: Row(
+      body: Column(
         children: [
-          Icon(icon, color: textColor, size: 20),
-          const SizedBox(width: 10),
+          // ── Purple header ─────────────────────────────────────────
+          Container(
+            color: AppTheme.purple,
+            child: SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Row(children: [
+                  const Icon(Icons.menu_rounded, color: Colors.white, size: 24),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('Health',  style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700, height: 1.1)),
+                      Text('Monitor', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700, height: 1.1)),
+                    ]),
+                  ),
+                  CircleAvatar(
+                    radius: 18,
+                    backgroundColor: Colors.white24,
+                    child: Text(initials.isEmpty ? '?' : initials,
+                        style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
+                  ),
+                ]),
+              ),
+            ),
+          ),
+
+          // ── Body ──────────────────────────────────────────────────
           Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                color: textColor,
-                fontWeight: FontWeight.w600,
-                fontSize: 13,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+
+                  // Connection card
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.cardBorder)),
+                    child: Row(children: [
+                      CircleAvatar(radius: 4, backgroundColor: connected ? AppTheme.success : const Color(0xFFADB5BD)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(connected ? 'HealthMonitor connected' : 'ESP32 not connected',
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                          Text(connected ? 'Live · every 2s' : (_btError ?? 'Tap SCAN to connect'),
+                              style: TextStyle(fontSize: 11, color: _btError != null ? AppTheme.danger : AppTheme.textSecondary)),
+                        ]),
+                      ),
+                      GestureDetector(
+                        onTap: connected ? _bt.disconnect : (_connecting ? null : _scan),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                          decoration: BoxDecoration(color: AppTheme.purple.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
+                          child: _connecting
+                              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.purple))
+                              : Text(connected ? 'DISCONNECT' : 'SCAN',
+                                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.purple)),
+                        ),
+                      ),
+                    ]),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Status row
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Current status', style: TextStyle(fontSize: 14, color: AppTheme.textSecondary)),
+                      if (latest != null)
+                        _statusPill(isRisk)
+                      else
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                          decoration: BoxDecoration(color: const Color(0xFFF1F3F5), borderRadius: BorderRadius.circular(20)),
+                          child: const Text('—', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textSecondary)),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Vital cards
+                  Row(children: [
+                    Expanded(child: _vCard('Heart rate', latest != null && latest.hr > 0 ? '${latest.hr.toInt()}' : '--', 'BPM',
+                        AppTheme.danger, latest != null && isRisk && (latest.hr > 110 || latest.hr < 50))),
+                    const SizedBox(width: 12),
+                    Expanded(child: _vCard('Temperature', latest != null && latest.temp > 0 ? latest.temp.toStringAsFixed(1) : '--', '°C',
+                        AppTheme.purple, latest != null && isRisk && latest.temp > 38, large: true)),
+                  ]),
+                  const SizedBox(height: 12),
+
+                  Row(children: [
+                    Expanded(child: _vCard('SpO2', latest != null && latest.spo2 > 0 ? '${latest.spo2.toInt()}' : '--', '%',
+                        AppTheme.primary, latest != null && isRisk && latest.spo2 < 94)),
+                    const SizedBox(width: 12),
+                    Expanded(child: _statusCard(latest, isRisk)),
+                  ]),
+                  const SizedBox(height: 16),
+
+                  if (_history.isNotEmpty) _barChart(),
+
+                  if (latest == null) ...[
+                    const SizedBox(height: 24),
+                    _notConnectedHint(connected),
+                  ],
+                ],
               ),
             ),
           ),
@@ -307,217 +266,121 @@ class _StatusBanner extends StatelessWidget {
       ),
     );
   }
-}
 
-class _VitalCard extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final String unit;
-  final bool isRisk;
-  final bool wide;
+  Widget _statusPill(bool isRisk) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+    decoration: BoxDecoration(
+      color: (isRisk ? AppTheme.danger : AppTheme.success).withOpacity(0.08),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: (isRisk ? AppTheme.danger : AppTheme.success).withOpacity(0.3)),
+    ),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: isRisk ? AppTheme.danger : AppTheme.success)),
+      const SizedBox(width: 5),
+      Text(isRisk ? 'Risk' : 'Normal', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: isRisk ? AppTheme.danger : AppTheme.success)),
+    ]),
+  );
 
-  const _VitalCard({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.unit,
-    required this.isRisk,
-    this.wide = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = isRisk ? AppTheme.danger : AppTheme.success;
-
-    return Container(
+  Widget _vCard(String label, String value, String unit, Color color, bool risk, {bool large = false}) =>
+    Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isRisk ? AppTheme.danger.withOpacity(0.4) : AppTheme.cardBorder,
-        ),
-        boxShadow: isRisk
-            ? [
-                BoxShadow(
-                    color: AppTheme.danger.withOpacity(0.08),
-                    blurRadius: 8,
-                    spreadRadius: 2)
-              ]
-            : [],
+        color: Colors.white, borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: risk ? AppTheme.danger.withOpacity(0.4) : AppTheme.cardBorder),
       ),
-      child: wide
-          ? Row(
-              children: [
-                _iconBox(accent),
-                const SizedBox(width: 14),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(label,
-                        style: const TextStyle(
-                            fontSize: 12, color: AppTheme.textSecondary)),
-                    const SizedBox(height: 4),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(value,
-                            style: TextStyle(
-                                fontSize: 36,
-                                fontWeight: FontWeight.w700,
-                                color: accent)),
-                        const SizedBox(width: 4),
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 6),
-                          child: Text(unit,
-                              style: const TextStyle(
-                                  fontSize: 14,
-                                  color: AppTheme.textSecondary)),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                if (isRisk)
-                  const Icon(Icons.warning_rounded,
-                      color: AppTheme.danger, size: 20),
-              ],
-            )
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    _iconBox(accent),
-                    if (isRisk)
-                      const Icon(Icons.warning_rounded,
-                          color: AppTheme.danger, size: 18),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Text(label,
-                    style: const TextStyle(
-                        fontSize: 11, color: AppTheme.textSecondary)),
-                const SizedBox(height: 4),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(value,
-                        style: TextStyle(
-                            fontSize: 30,
-                            fontWeight: FontWeight.w700,
-                            color: accent)),
-                    const SizedBox(width: 3),
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Text(unit,
-                          style: const TextStyle(
-                              fontSize: 12, color: AppTheme.textSecondary)),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary, fontWeight: FontWeight.w500)),
+        const SizedBox(height: 8),
+        Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          Text(value, style: TextStyle(
+              fontSize: large ? 38 : 34, fontWeight: FontWeight.w700, height: 1,
+              color: value == '--' ? AppTheme.cardBorder : (risk ? AppTheme.danger : color))),
+          const SizedBox(width: 3),
+          Padding(padding: const EdgeInsets.only(bottom: 4),
+              child: Text(unit, style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary))),
+        ]),
+      ]),
     );
-  }
 
-  Widget _iconBox(Color accent) {
-    return Container(
-      width: 36,
-      height: 36,
-      decoration: BoxDecoration(
-        color: accent.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
+  Widget _statusCard(VitalReading? latest, bool isRisk) => Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.cardBorder)),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Status', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary, fontWeight: FontWeight.w500)),
+      const SizedBox(height: 8),
+      if (latest == null)
+        const Text('--', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700, color: AppTheme.cardBorder))
+      else ...[
+        Row(children: [
+          CircleAvatar(radius: 5, backgroundColor: isRisk ? AppTheme.danger : AppTheme.success),
+          const SizedBox(width: 8),
+          Text(isRisk ? 'RISK' : 'OK', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700, color: isRisk ? AppTheme.danger : AppTheme.success)),
+        ]),
+        const SizedBox(height: 2),
+        Text(isRisk ? 'Risk detected' : 'No risk', style: TextStyle(fontSize: 12, color: isRisk ? AppTheme.danger : AppTheme.success)),
+      ],
+    ]),
+  );
+
+  Widget _barChart() => Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.cardBorder)),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Heart rate — last 8 readings', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: AppTheme.textSecondary)),
+      const SizedBox(height: 12),
+      SizedBox(height: 60, child: CustomPaint(painter: _BarPainter(values: _history), size: const Size(double.infinity, 60))),
+    ]),
+  );
+
+  Widget _notConnectedHint(bool connected) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(20),
+    decoration: BoxDecoration(
+      color: AppTheme.purple.withOpacity(0.04),
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: AppTheme.purple.withOpacity(0.15)),
+    ),
+    child: Column(children: [
+      Icon(Icons.bluetooth_searching_rounded, color: AppTheme.purple.withOpacity(0.4), size: 40),
+      const SizedBox(height: 12),
+      Text(connected ? 'Waiting for readings...' : 'No device connected',
+          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+      const SizedBox(height: 6),
+      Text(
+        connected
+          ? 'Place your finger on the sensor.\nReadings will appear here in ~15 seconds.'
+          : 'Tap SCAN to connect to your HealthMonitor device.\nMake sure it is paired in phone Bluetooth settings first.',
+        textAlign: TextAlign.center,
+        style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary, height: 1.5),
       ),
-      child: Icon(icon, color: accent, size: 18),
-    );
-  }
+    ]),
+  );
 }
 
-class _MiniChart extends StatelessWidget {
+class _BarPainter extends CustomPainter {
   final List<double> values;
-  final String label;
-
-  const _MiniChart({required this.values, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    final max = values.reduce((a, b) => a > b ? a : b);
-    final min = values.reduce((a, b) => a < b ? a : b);
-    final range = (max - min).clamp(1.0, double.infinity);
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.cardBorder),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label,
-              style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.textSecondary)),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 60,
-            child: CustomPaint(
-              size: const Size(double.infinity, 60),
-              painter: _LinePainter(values: values, min: min, range: range),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _LinePainter extends CustomPainter {
-  final List<double> values;
-  final double min;
-  final double range;
-
-  _LinePainter({required this.values, required this.min, required this.range});
+  _BarPainter({required this.values});
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (values.length < 2) return;
-
-    final paint = Paint()
-      ..color = AppTheme.primary
-      ..strokeWidth = 2
-      ..style = PaintingStyle.stroke
-      ..strokeJoin = StrokeJoin.round;
-
-    final path = Path();
+    if (values.isEmpty) return;
+    final maxV = values.reduce((a, b) => a > b ? a : b).clamp(1.0, double.infinity);
+    final barW = (size.width / values.length) * 0.6;
+    final gap  = (size.width / values.length) * 0.4;
     for (int i = 0; i < values.length; i++) {
-      final x = (i / (values.length - 1)) * size.width;
-      final y = size.height - ((values[i] - min) / range) * size.height;
-      if (i == 0) {
-        path.moveTo(x, y);
-      } else {
-        path.lineTo(x, y);
-      }
-    }
-    canvas.drawPath(path, paint);
-
-    // Dots
-    final dotPaint = Paint()
-      ..color = AppTheme.primary
-      ..style = PaintingStyle.fill;
-    for (int i = 0; i < values.length; i++) {
-      final x = (i / (values.length - 1)) * size.width;
-      final y = size.height - ((values[i] - min) / range) * size.height;
-      canvas.drawCircle(Offset(x, y), 3, dotPaint);
+      final ratio  = values[i] / maxV;
+      final isHigh = values[i] > 100 || values[i] < 50;
+      final isLast = i == values.length - 1;
+      final paint  = Paint()
+        ..color = isHigh ? AppTheme.danger : isLast ? AppTheme.purple : AppTheme.purple.withOpacity(0.45)
+        ..style = PaintingStyle.fill;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(Rect.fromLTWH(i * (barW + gap) + gap / 2, size.height - ratio * size.height, barW, ratio * size.height), const Radius.circular(4)),
+        paint,
+      );
     }
   }
 
   @override
-  bool shouldRepaint(_LinePainter old) => old.values != values;
+  bool shouldRepaint(_BarPainter old) => old.values != values;
 }

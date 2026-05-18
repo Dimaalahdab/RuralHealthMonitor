@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import '../app_theme.dart';
 import '../models/patient_profile.dart';
 import '../services/profile_service.dart';
-import 'pin_login_screen.dart'; 
+import 'pin_login_screen.dart';
 
 class PatientSetupScreen extends StatefulWidget {
   const PatientSetupScreen({super.key});
@@ -22,7 +22,7 @@ class _PatientSetupScreenState extends State<PatientSetupScreen> {
   bool _obscurePin = true;
   bool _obscureConfirm = true;
   bool _saving = false;
-  int _step = 0; // 0=personal info, 1=PIN
+  int _step = 0;
 
   final _profileService = ProfileService();
 
@@ -72,41 +72,27 @@ class _PatientSetupScreenState extends State<PatientSetupScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 32),
-                // Header
                 Container(
-                  width: 60,
-                  height: 60,
+                  width: 60, height: 60,
                   decoration: BoxDecoration(
-                    color: AppTheme.primary.withOpacity(0.1),
+                    color: AppTheme.purple.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(16),
                   ),
-                  child: const Icon(
-                    Icons.favorite_rounded,
-                    color: AppTheme.primary,
-                    size: 30,
-                  ),
+                  child: const Icon(Icons.favorite_rounded,
+                      color: AppTheme.purple, size: 30),
                 ),
                 const SizedBox(height: 20),
-                const Text(
-                  'Rural Health Monitor',
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.textPrimary,
-                  ),
-                ),
+                const Text('Rural Health Monitor',
+                    style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 6),
                 Text(
                   _step == 0
                       ? 'Let\'s set up your health profile.'
                       : 'Create a secure PIN to protect your data.',
                   style: const TextStyle(
-                    fontSize: 15,
-                    color: AppTheme.textSecondary,
-                  ),
+                      fontSize: 15, color: AppTheme.textSecondary),
                 ),
                 const SizedBox(height: 8),
-                // Step indicator
                 Row(
                   children: [
                     _stepDot(0),
@@ -115,9 +101,8 @@ class _PatientSetupScreenState extends State<PatientSetupScreen> {
                   ],
                 ),
                 const SizedBox(height: 32),
-
                 if (_step == 0) ...[
-                  _buildLabel('Full Name'),
+                  _label('Full Name'),
                   const SizedBox(height: 6),
                   TextFormField(
                     controller: _nameCtrl,
@@ -127,15 +112,13 @@ class _PatientSetupScreenState extends State<PatientSetupScreen> {
                       prefixIcon: Icon(Icons.person_outline),
                     ),
                     validator: (v) {
-                      if (v == null || v.trim().isEmpty) {
-                        return 'Please enter your name';
-                      }
+                      if (v == null || v.trim().isEmpty) return 'Please enter your name';
                       if (v.trim().length < 2) return 'Name too short';
                       return null;
                     },
                   ),
                   const SizedBox(height: 20),
-                  _buildLabel('Age'),
+                  _label('Age'),
                   const SizedBox(height: 6),
                   TextFormField(
                     controller: _ageCtrl,
@@ -146,13 +129,9 @@ class _PatientSetupScreenState extends State<PatientSetupScreen> {
                       prefixIcon: Icon(Icons.cake_outlined),
                     ),
                     validator: (v) {
-                      if (v == null || v.trim().isEmpty) {
-                        return 'Please enter your age';
-                      }
+                      if (v == null || v.trim().isEmpty) return 'Please enter your age';
                       final age = int.tryParse(v);
-                      if (age == null || age < 1 || age > 120) {
-                        return 'Enter a valid age (1–120)';
-                      }
+                      if (age == null || age < 1 || age > 120) return 'Enter a valid age (1–120)';
                       return null;
                     },
                   ),
@@ -165,7 +144,7 @@ class _PatientSetupScreenState extends State<PatientSetupScreen> {
                     ),
                   ),
                 ] else ...[
-                  _buildLabel('Create 4-Digit PIN'),
+                  _label('Create 4-Digit PIN'),
                   const SizedBox(height: 6),
                   TextFormField(
                     controller: _pinCtrl,
@@ -182,19 +161,16 @@ class _PatientSetupScreenState extends State<PatientSetupScreen> {
                         icon: Icon(_obscurePin
                             ? Icons.visibility_outlined
                             : Icons.visibility_off_outlined),
-                        onPressed: () =>
-                            setState(() => _obscurePin = !_obscurePin),
+                        onPressed: () => setState(() => _obscurePin = !_obscurePin),
                       ),
                     ),
                     validator: (v) {
-                      if (v == null || v.length != 4) {
-                        return 'PIN must be exactly 4 digits';
-                      }
+                      if (v == null || v.length != 4) return 'PIN must be exactly 4 digits';
                       return null;
                     },
                   ),
                   const SizedBox(height: 20),
-                  _buildLabel('Confirm PIN'),
+                  _label('Confirm PIN'),
                   const SizedBox(height: 6),
                   TextFormField(
                     controller: _pinConfirmCtrl,
@@ -211,8 +187,7 @@ class _PatientSetupScreenState extends State<PatientSetupScreen> {
                         icon: Icon(_obscureConfirm
                             ? Icons.visibility_outlined
                             : Icons.visibility_off_outlined),
-                        onPressed: () =>
-                            setState(() => _obscureConfirm = !_obscureConfirm),
+                        onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm),
                       ),
                     ),
                     validator: (v) {
@@ -224,19 +199,17 @@ class _PatientSetupScreenState extends State<PatientSetupScreen> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: AppTheme.primary.withOpacity(0.06),
+                      color: AppTheme.purple.withOpacity(0.06),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: const Row(
                       children: [
-                        Icon(Icons.info_outline,
-                            size: 16, color: AppTheme.primary),
+                        Icon(Icons.info_outline, size: 16, color: AppTheme.purple),
                         SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'This PIN protects your health data. Remember it — you\'ll enter it every time you open the app.',
-                            style: TextStyle(
-                                fontSize: 12, color: AppTheme.primary),
+                            'Remember this PIN — you\'ll enter it every time you open the app.',
+                            style: TextStyle(fontSize: 12, color: AppTheme.purple),
                           ),
                         ),
                       ],
@@ -255,8 +228,7 @@ class _PatientSetupScreenState extends State<PatientSetupScreen> {
                           onPressed: _saving ? null : _saveProfile,
                           child: _saving
                               ? const SizedBox(
-                                  height: 18,
-                                  width: 18,
+                                  height: 18, width: 18,
                                   child: CircularProgressIndicator(
                                       strokeWidth: 2, color: Colors.white))
                               : const Text('Create Profile'),
@@ -280,19 +252,16 @@ class _PatientSetupScreenState extends State<PatientSetupScreen> {
       width: active ? 24 : 8,
       height: 8,
       decoration: BoxDecoration(
-        color: active ? AppTheme.primary : AppTheme.cardBorder,
+        color: active ? AppTheme.purple : AppTheme.cardBorder,
         borderRadius: BorderRadius.circular(4),
       ),
     );
   }
 
-  Widget _buildLabel(String text) => Text(
-        text,
-        style: const TextStyle(
+  Widget _label(String text) => Text(text,
+      style: const TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w600,
           color: AppTheme.textSecondary,
-          letterSpacing: 0.3,
-        ),
-      );
+          letterSpacing: 0.3));
 }

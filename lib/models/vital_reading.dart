@@ -57,5 +57,6 @@ class VitalReading {
       spo2: double.tryParse(parts['SPO2'] ?? '0') ?? 0,
       status: parts['STATUS'] ?? 'UNKNOWN',
     );
+
   }
 }

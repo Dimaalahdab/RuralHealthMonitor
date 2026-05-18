@@ -1,71 +1,80 @@
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../../models/patient_profile.dart';
+import '../models/patient_profile.dart';
 
 class ProfileService {
-  static const _keyName = 'patient_name';
-  static const _keyAge = 'patient_age';
-  static const _keyPin = 'patient_pin';
-  static const _keySetupDone = 'setup_done';
-  static const _keyFailedAttempts = 'failed_attempts';
-  static const _keyLockUntil = 'lock_until';
+  static const _kName    = 'patient_name';
+  static const _kAge     = 'patient_age';
+  static const _kPin     = 'patient_pin';
+  static const _kFails   = 'failed_attempts';
+  static const _kLock    = 'lock_until';
 
-  // ── Setup ────────────────────────────────────────────────────────────────
-
-  Future<bool> isSetupDone() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_keySetupDone) ?? false;
-  }
-
+  // ── Save ───────────────────────────────────────────────────────────────────
   Future<void> saveProfile(PatientProfile profile) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyName, profile.name);
-    await prefs.setInt(_keyAge, profile.age);
-    await prefs.setString(_keyPin, profile.pin);
-    await prefs.setBool(_keySetupDone, true);
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kName, profile.name);
+    await p.setInt(_kAge,     profile.age);
+    await p.setString(_kPin,  profile.pin);
+    debugPrint('[ProfileService] Saved: name=${profile.name} pin=${profile.pin}');
   }
 
+  // ── Check setup done ───────────────────────────────────────────────────────
+  Future<bool> isSetupDone() async {
+    final p = await SharedPreferences.getInstance();
+    final ok = p.getString(_kName) != null && p.getString(_kPin) != null;
+    debugPrint('[ProfileService] isSetupDone=$ok');
+    return ok;
+  }
+
+  // ── Load profile ───────────────────────────────────────────────────────────
   Future<PatientProfile?> getProfile() async {
-    final prefs = await SharedPreferences.getInstance();
-    final name = prefs.getString(_keyName);
-    final age = prefs.getInt(_keyAge);
-    final pin = prefs.getString(_keyPin);
-    if (name == null || age == null || pin == null) return null;
-    return PatientProfile(name: name, age: age, pin: pin);
+    final p    = await SharedPreferences.getInstance();
+    final name = p.getString(_kName);
+    final age  = p.getInt(_kAge);
+    final pin  = p.getString(_kPin);
+    debugPrint('[ProfileService] getProfile: name=$name age=$age pinSet=${pin != null}');
+    if (name == null || pin == null) return null;
+    return PatientProfile(name: name, age: age ?? 0, pin: pin);
   }
 
-  // ── PIN verification ─────────────────────────────────────────────────────
-
-  /// Returns null on success, or an error message string on failure.
-  Future<String?> verifyPin(String enteredPin) async {
-    final prefs = await SharedPreferences.getInstance();
-
-    // Check lock
-    final lockUntil = prefs.getInt(_keyLockUntil) ?? 0;
+  // ── Verify PIN ─────────────────────────────────────────────────────────────
+  /// Returns null on success, error string on failure.
+  Future<String?> verifyPin(String entered) async {
+    final p   = await SharedPreferences.getInstance();
     final now = DateTime.now().millisecondsSinceEpoch;
+
+    // Check lockout
+    final lockUntil = p.getInt(_kLock) ?? 0;
     if (now < lockUntil) {
-      final remaining = ((lockUntil - now) / 1000).ceil();
-      return 'Too many attempts. Try again in $remaining seconds.';
+      final secs = ((lockUntil - now) / 1000).ceil();
+      return 'Locked. Try again in $secs seconds.';
     }
 
-    final storedPin = prefs.getString(_keyPin) ?? '';
-    if (enteredPin == storedPin) {
-      await prefs.setInt(_keyFailedAttempts, 0);
-      return null; // success
+    final stored = p.getString(_kPin) ?? '';
+    debugPrint('[ProfileService] verifyPin: entered=$entered stored=$stored');
+
+    if (entered == stored) {
+      await p.setInt(_kFails, 0);
+      debugPrint('[ProfileService] PIN correct ✓');
+      return null; // ✅ success
     }
 
-    // Wrong PIN
-    final attempts = (prefs.getInt(_keyFailedAttempts) ?? 0) + 1;
-    await prefs.setInt(_keyFailedAttempts, attempts);
-    if (attempts >= 3) {
-      await prefs.setInt(_keyLockUntil, now + 30000); // 30s lock
-      await prefs.setInt(_keyFailedAttempts, 0);
-      return 'Too many wrong attempts. Locked for 30 seconds.';
+    // Wrong PIN — increment fails
+    final fails = (p.getInt(_kFails) ?? 0) + 1;
+    await p.setInt(_kFails, fails);
+    debugPrint('[ProfileService] Wrong PIN. fails=$fails');
+
+    if (fails >= 3) {
+      await p.setInt(_kLock,  now + 30000);
+      await p.setInt(_kFails, 0);
+      return 'Too many attempts. Locked for 30 seconds.';
     }
-    return 'Incorrect PIN. ${3 - attempts} attempt(s) remaining.';
+    return 'Incorrect PIN. ${3 - fails} attempt(s) remaining.';
   }
 
   Future<void> resetAll() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.clear();
+    final p = await SharedPreferences.getInstance();
+    await p.clear();
+    debugPrint('[ProfileService] All data cleared.');
   }
 }

@@ -12,5 +12,6 @@ class PatientProfile {
   Map<String, dynamic> toJson() => {
         'name': name,
         'age': age,
+        'pin': pin, // Add this line
       };
 }
